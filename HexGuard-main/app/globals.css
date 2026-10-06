@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+:root {
+  --background: #08090E;
+  --foreground: #F1F5F9;
+  --card-bg: rgba(15, 18, 28, 0.7);
+  --card-border: rgba(255, 255, 255, 0.08);
+  --accent-primary: #3B82F6;
+  --accent-emerald: #10B981;
+  --accent-amber: #F59E0B;
+  --accent-rose: #F43F5E;
+}
+
+body {
+  background-color: #08090E;
+  color: #F1F5F9;
+  min-height: 100vh;
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow-x: hidden;
+  background-image: 
+    radial-gradient(circle 800px at 50% -100px, rgba(99, 102, 241, 0.08), transparent),
+    radial-gradient(circle 600px at 85% 200px, rgba(14, 165, 233, 0.04), transparent),
+    linear-gradient(to bottom, #08090E 0%, #0B0D14 100%);
+  background-attachment: fixed;
+}
+
+/* Precision Forensic Dot Grid */
+.cyber-grid {
+  background-size: 28px 28px;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+}
+
+/* Refined Precision Glass Panels */
+.glass-panel {
+  background: rgba(13, 16, 26, 0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+.glass-panel-glow {
+  background: rgba(15, 19, 32, 0.8);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  box-shadow: 0 0 30px rgba(59, 130, 246, 0.08), inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Radar Scan Line Animation */
+@keyframes radar-sweep {
+  0% {
+    top: 0%;
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    top: 100%;
+    opacity: 0.8;
+  }
+}
+
+.animate-radar-sweep {
+  animation: radar-sweep 2.2s ease-in-out infinite alternate;
+}
+
+/* Pulse glow animation */
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.03);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 3s ease-in-out infinite;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0B1120;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1E293B;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #0EA5E9;
+}
+
+/* Print Styles for Forensic Report */
+@media print {
+  body {
+    background: #FFFFFF !important;
+    color: #000000 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .glass-panel, .glass-panel-glow {
+    background: #FFFFFF !important;
+    border: 1px solid #CCCCCC !important;
+    box-shadow: none !important;
+    color: #000000 !important;
+  }
+}
