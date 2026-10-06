@@ -13,6 +13,7 @@
 export interface TemporalFrameData {
   timestamp: number; // In seconds
   dataUrl: string; // Base64 JPEG/PNG
+  pixels?: Uint8ClampedArray; // Cached downscaled pixel buffer for zero-overhead rolling window
 }
 
 export interface TemporalAnomaly {
@@ -100,11 +101,16 @@ export class TemporalConsistencyEngine {
     const numPixels = width * height;
 
     try {
-      // Extract pixel buffers for all frames
+      // Extract pixel buffers for all frames (reusing cached buffers if available)
       const pixelBuffers: Uint8ClampedArray[] = [];
       for (const frame of frames) {
-        const pixels = await getImagePixels(frame.dataUrl, width, height);
-        pixelBuffers.push(pixels);
+        if (frame.pixels) {
+          pixelBuffers.push(frame.pixels);
+        } else {
+          const pixels = await getImagePixels(frame.dataUrl, width, height);
+          frame.pixels = pixels;
+          pixelBuffers.push(pixels);
+        }
       }
 
       // Pairwise sequential analysis

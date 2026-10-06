@@ -77,6 +77,11 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
   const frameBufferRef = useRef<TemporalFrameData[]>([]);
   const rollingWindowRef = useRef<{ risk: number; weight: number }[]>([]);
   const isRunningRef = useRef<boolean>(true);
+  const isAnalyzingRef = useRef<boolean>(false);
+  const runtimeSecondsRef = useRef<number>(0);
+  runtimeSecondsRef.current = runtimeSeconds;
+  const framesAnalyzedRef = useRef<number>(0);
+  framesAnalyzedRef.current = framesAnalyzed;
 
   // Detect YouTube video / live ID
   const youtubeId = useMemo(() => {
@@ -186,12 +191,16 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
       let temporalAnomalyReason = '';
 
       if (frameBufferRef.current.length >= 2) {
-        const tempReport = await TemporalConsistencyEngine.analyzeFrames(frameBufferRef.current);
-        temporalScore = tempReport.score;
-        if (!tempReport.isConsistent || tempReport.anomalies.length > 0) {
-          temporalAnomalyDetected = true;
-          temporalAnomalyReason =
-            tempReport.anomalies[0]?.description || 'Temporal inconsistency flagged.';
+        try {
+          const tempReport = await TemporalConsistencyEngine.analyzeFrames(frameBufferRef.current);
+          temporalScore = tempReport.score;
+          if (!tempReport.isConsistent || tempReport.anomalies.length > 0) {
+            temporalAnomalyDetected = true;
+            temporalAnomalyReason =
+              tempReport.anomalies[0]?.description || 'Temporal inconsistency flagged.';
+          }
+        } catch {
+          // Temporal graceful pass
         }
       }
 
@@ -234,7 +243,7 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
 
       setCurrentRisk(computedRollingRisk);
       setCurrentTrust(computedTrust);
-      setConfidence(Math.min(94, 85 + Math.round(framesAnalyzed / 100)));
+      setConfidence(Math.min(94, 85 + Math.round((framesAnalyzedRef.current + 1) / 100)));
       setTemporalState(temporalAnomalyDetected ? 'Anomalous' : 'Normal');
 
       // Add to timeline events (keep latest 20 events)
@@ -255,35 +264,49 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
 
       setEvents((prev) => [newEvent, ...prev.slice(0, 19)]);
     },
-    [framesAnalyzed]
+    []
   );
 
   // Frame Processing Loop
   const processLiveFrame = useCallback(async () => {
-    if (!isRunningRef.current || !canvasRef.current) return;
+    if (!isRunningRef.current || !canvasRef.current || isAnalyzingRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // PATH A: YouTube Live Stream Ingestion (uses official authorized live image CDN with CORS allow-origin)
+    // PATH A: YouTube Live Stream Ingestion (uses server-side frame proxy for zero CORS/taint issues)
     if (youtubeId) {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = async () => {
-        if (!isRunningRef.current) return;
-        const width = Math.min(640, img.naturalWidth || 640);
-        const height = Math.min(360, img.naturalHeight || 360);
-        canvas.width = width;
-        canvas.height = height;
-        ctx.drawImage(img, 0, 0, width, height);
-        const frameDataUrl = canvas.toDataURL('image/jpeg', 0.85);
-        await analyzeSampledFrame(frameDataUrl, runtimeSeconds);
-      };
-      img.onerror = () => {
-        // Fallback or retry next tick
-      };
-      // Cache-busting query parameter pulls the latest live broadcast frame
-      img.src = `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg?_t=${Date.now()}`;
+      isAnalyzingRef.current = true;
+      try {
+        const proxyUrl = `/api/platforms/frame-proxy?youtubeId=${youtubeId}&_t=${Date.now()}`;
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+
+        await new Promise<void>((resolve) => {
+          img.onload = async () => {
+            try {
+              if (!isRunningRef.current) return;
+              const width = Math.min(320, img.naturalWidth || 320);
+              const height = Math.min(180, img.naturalHeight || 180);
+              canvas.width = width;
+              canvas.height = height;
+              ctx.drawImage(img, 0, 0, width, height);
+              const frameDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+              await analyzeSampledFrame(frameDataUrl, runtimeSecondsRef.current);
+            } catch (err) {
+              console.warn('Live frame analysis error:', err);
+            } finally {
+              resolve();
+            }
+          };
+          img.onerror = () => {
+            resolve();
+          };
+          img.src = proxyUrl;
+        });
+      } finally {
+        isAnalyzingRef.current = false;
+      }
       return;
     }
 
@@ -293,20 +316,27 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
       return;
     }
 
+    isAnalyzingRef.current = true;
     try {
-      const width = Math.min(640, video.videoWidth || 640);
-      const height = Math.min(360, video.videoHeight || 360);
+      const width = Math.min(320, video.videoWidth || 320);
+      const height = Math.min(180, video.videoHeight || 180);
       canvas.width = width;
       canvas.height = height;
 
       ctx.drawImage(video, 0, 0, width, height);
       const frameDataUrl = canvas.toDataURL('image/jpeg', 0.85);
-      const currentTime = video.currentTime || runtimeSeconds;
+      const currentTime = video.currentTime || runtimeSecondsRef.current;
       await analyzeSampledFrame(frameDataUrl, currentTime);
     } catch (err) {
       console.warn('Live frame sampling error:', err);
+    } finally {
+      isAnalyzingRef.current = false;
     }
-  }, [youtubeId, runtimeSeconds, analyzeSampledFrame]);
+  }, [youtubeId, analyzeSampledFrame]);
+
+  // Keep ref up to date for steady interval invocation
+  const processLiveFrameRef = useRef<() => Promise<void>>(async () => {});
+  processLiveFrameRef.current = processLiveFrame;
 
   // Source Initialization Effect
   useEffect(() => {
@@ -344,12 +374,12 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
       }
     }
 
-    // Set sampling interval (~1 frame every 1.2 seconds for real-time live forensics)
+    // Set sampling interval (1 frame every 1.0 second for real-time live forensics)
     const samplingInterval = setInterval(() => {
-      if (isRunningRef.current) {
-        processLiveFrame();
+      if (isRunningRef.current && !isAnalyzingRef.current) {
+        processLiveFrameRef.current().catch((e) => console.warn('Frame sample error:', e));
       }
-    }, 1200);
+    }, 1000);
 
     return () => {
       clearInterval(samplingInterval);
@@ -362,7 +392,7 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
         video.src = '';
       }
     };
-  }, [youtubeId, currentSource, activeMediaStream, processLiveFrame]);
+  }, [youtubeId, currentSource, activeMediaStream]);
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 animate-fadeIn pb-16">

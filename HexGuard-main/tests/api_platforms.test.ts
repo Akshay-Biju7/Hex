@@ -75,3 +75,27 @@ describe('API Route /api/platforms/validate Integration Tests', () => {
     assert.ok(json.error.includes('internal network'));
   });
 });
+
+describe('API Route /api/platforms/frame-proxy Integration Tests', () => {
+  test('returns 400 when url or youtubeId is missing', async () => {
+    const { GET } = await import('../app/api/platforms/frame-proxy/route');
+    const req = new NextRequest('http://localhost:3000/api/platforms/frame-proxy');
+    const res = await GET(req);
+    assert.strictEqual(res.status, 400);
+  });
+
+  test('returns 400 for invalid youtubeId format', async () => {
+    const { GET } = await import('../app/api/platforms/frame-proxy/route');
+    const req = new NextRequest('http://localhost:3000/api/platforms/frame-proxy?youtubeId=bad!id');
+    const res = await GET(req);
+    assert.strictEqual(res.status, 400);
+  });
+
+  test('blocks SSRF on frame proxy', async () => {
+    const { GET } = await import('../app/api/platforms/frame-proxy/route');
+    const req = new NextRequest('http://localhost:3000/api/platforms/frame-proxy?url=http://127.0.0.1:8080/secret.jpg');
+    const res = await GET(req);
+    assert.strictEqual(res.status, 403);
+  });
+});
+
