@@ -419,22 +419,39 @@ export const ImageDropzone: React.FC<ImageDropzoneProps> = ({
                 type="text"
                 value={streamUrlInput}
                 onChange={(e) => setStreamUrlInput(e.target.value)}
-                placeholder="Stream URL (e.g., https://example.com/live/stream.m3u8 or MP4 stream)"
+                placeholder="Stream URL (e.g. YouTube Live, HLS .m3u8, or MP4 stream)"
                 disabled={isLoading}
                 className="w-full pl-11 pr-4 py-3.5 bg-slate-950/80 border border-white/[0.1] rounded-2xl text-xs sm:text-sm font-mono text-white placeholder-slate-500 focus:outline-none focus:border-rose-500/60 focus:ring-1 focus:ring-rose-500/40 transition-all shadow-inner"
               />
             </div>
 
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
-              {/* Quick Browser Camera Capture Trigger */}
-              <button
-                type="button"
-                onClick={handleStartCameraStream}
-                className="w-full sm:w-auto px-4 py-2.5 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.1] text-cyan-300 rounded-xl text-xs font-mono font-medium transition-all flex items-center justify-center gap-2"
-              >
-                <Camera className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Use Webcam / Live Camera Feed</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                {/* Quick Browser Camera Capture Trigger */}
+                <button
+                  type="button"
+                  onClick={handleStartCameraStream}
+                  className="px-4 py-2.5 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.1] text-cyan-300 rounded-xl text-xs font-mono font-medium transition-all flex items-center justify-center gap-2"
+                >
+                  <Camera className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Use Webcam Feed</span>
+                </button>
+
+                {/* Quick Sample Live Stream Feed */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStreamUrlInput('https://youtu.be/zjy0QEJQorg');
+                    if (onStartLiveStream) {
+                      onStartLiveStream({ streamUrl: 'https://youtu.be/zjy0QEJQorg' });
+                    }
+                  }}
+                  className="px-4 py-2.5 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.1] text-rose-300 rounded-xl text-xs font-mono font-medium transition-all flex items-center justify-center gap-2"
+                >
+                  <Radio className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+                  <span>Load Live Sample</span>
+                </button>
+              </div>
 
               <button
                 type="submit"

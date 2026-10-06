@@ -59,8 +59,11 @@ export class YouTubeAdapter implements PlatformAdapter {
         thumbnail_url?: string;
       };
 
-      // Check if URL indicates a live stream
-      const isLiveUrl = url.includes('/live/') || url.includes('live=1');
+      // Check if URL or title indicates an active live stream
+      const isLiveUrl =
+        url.includes('/live/') ||
+        url.includes('live=1') ||
+        /\blive\b/i.test(oembed.title || '');
 
       return {
         platform: 'youtube',

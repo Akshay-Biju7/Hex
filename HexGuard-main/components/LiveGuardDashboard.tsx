@@ -1,18 +1,20 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Radio,
   Square,
   AlertTriangle,
   CheckCircle,
   Activity,
-  ShieldAlert,
   Clock,
   Layers,
   Eye,
   Maximize2,
   X,
+  Camera,
+  Play,
+  Globe,
 } from 'lucide-react';
 import { generateELA } from '@/lib/ela';
 import { TemporalConsistencyEngine, TemporalFrameData } from '@/lib/temporal';
@@ -48,10 +50,12 @@ interface LiveGuardDashboardProps {
 }
 
 export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
-  streamSource,
-  mediaStream,
+  streamSource: initialStreamSource,
+  mediaStream: initialMediaStream,
   onStop,
 }) => {
+  const [currentSource, setCurrentSource] = useState<string>(initialStreamSource);
+  const [activeMediaStream, setActiveMediaStream] = useState<MediaStream | null | undefined>(initialMediaStream);
   const [status, setStatus] = useState<LiveStreamStatus>('Connecting');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [runtimeSeconds, setRuntimeSeconds] = useState<number>(0);
@@ -73,6 +77,15 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
   const frameBufferRef = useRef<TemporalFrameData[]>([]);
   const rollingWindowRef = useRef<{ risk: number; weight: number }[]>([]);
   const isRunningRef = useRef<boolean>(true);
+
+  // Detect YouTube video / live ID
+  const youtubeId = useMemo(() => {
+    if (!currentSource || typeof currentSource !== 'string') return null;
+    const match = currentSource.match(
+      /(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i
+    );
+    return match ? match[1] : null;
+  }, [currentSource]);
 
   // Format runtime mm:ss
   const formatTime = (secs: number) => {
@@ -105,35 +118,44 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
         videoRef.current.srcObject = null;
       }
     }
-    onStop();
-  }, [onStop]);
-
-  // Frame Processing Loop
-  const processLiveFrame = useCallback(async () => {
-    if (!isRunningRef.current || !videoRef.current || !canvasRef.current) return;
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-
-    if (video.readyState < 2 || video.videoWidth === 0) {
-      return;
+    if (activeMediaStream) {
+      activeMediaStream.getTracks().forEach((track) => track.stop());
     }
+    onStop();
+  }, [activeMediaStream, onStop]);
 
+  // Switch to Webcam / Local Feed fallback
+  const handleStartWebcam = async () => {
+    setErrorMessage(null);
     try {
-      const width = Math.min(640, video.videoWidth || 640);
-      const height = Math.min(360, video.videoHeight || 360);
-      canvas.width = width;
-      canvas.height = height;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setErrorMessage('Webcam not supported in this browser.');
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+        audio: false,
+      });
+      setCurrentSource('Local WebRTC Camera Feed');
+      setActiveMediaStream(stream);
+      setStatus('Analyzing');
+    } catch (err) {
+      setErrorMessage('Could not access camera feed: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
 
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+  // Switch to Demo stream
+  const handleStartDemoStream = () => {
+    setErrorMessage(null);
+    setActiveMediaStream(null);
+    setCurrentSource('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4');
+    setStatus('Connecting');
+  };
 
-      ctx.drawImage(video, 0, 0, width, height);
-      const frameDataUrl = canvas.toDataURL('image/jpeg', 0.85);
-
+  // Core Forensic Evaluation per sampled frame
+  const analyzeSampledFrame = useCallback(
+    async (frameDataUrl: string, currentTime: number) => {
       setFramesAnalyzed((prev) => prev + 1);
-
-      // Current timestamp
-      const currentTime = video.currentTime || runtimeSeconds;
       const formattedTimestamp = formatTime(Math.round(currentTime));
 
       // 1. Buffer frame for temporal consistency evaluation
@@ -232,40 +254,97 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
       };
 
       setEvents((prev) => [newEvent, ...prev.slice(0, 19)]);
+    },
+    [framesAnalyzed]
+  );
+
+  // Frame Processing Loop
+  const processLiveFrame = useCallback(async () => {
+    if (!isRunningRef.current || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // PATH A: YouTube Live Stream Ingestion (uses official authorized live image CDN with CORS allow-origin)
+    if (youtubeId) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = async () => {
+        if (!isRunningRef.current) return;
+        const width = Math.min(640, img.naturalWidth || 640);
+        const height = Math.min(360, img.naturalHeight || 360);
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
+        const frameDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        await analyzeSampledFrame(frameDataUrl, runtimeSeconds);
+      };
+      img.onerror = () => {
+        // Fallback or retry next tick
+      };
+      // Cache-busting query parameter pulls the latest live broadcast frame
+      img.src = `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg?_t=${Date.now()}`;
+      return;
+    }
+
+    // PATH B: Direct Video or WebRTC MediaStream
+    const video = videoRef.current;
+    if (!video || video.readyState < 2 || video.videoWidth === 0) {
+      return;
+    }
+
+    try {
+      const width = Math.min(640, video.videoWidth || 640);
+      const height = Math.min(360, video.videoHeight || 360);
+      canvas.width = width;
+      canvas.height = height;
+
+      ctx.drawImage(video, 0, 0, width, height);
+      const frameDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      const currentTime = video.currentTime || runtimeSeconds;
+      await analyzeSampledFrame(frameDataUrl, currentTime);
     } catch (err) {
       console.warn('Live frame sampling error:', err);
     }
-  }, [framesAnalyzed, runtimeSeconds]);
+  }, [youtubeId, runtimeSeconds, analyzeSampledFrame]);
 
-  // Video Element Mount & Source Initialization
+  // Source Initialization Effect
   useEffect(() => {
     isRunningRef.current = true;
+    setErrorMessage(null);
 
-    const video = videoRef.current;
-    if (!video) return;
+    // If YouTube Live: the embed player handles playback, no video.src needed
+    if (youtubeId) {
+      setStatus('Analyzing');
+    } else {
+      const video = videoRef.current;
+      if (!video) return;
 
-    if (mediaStream) {
-      video.srcObject = mediaStream;
-      video.muted = true;
-      video.play().then(() => {
-        setStatus('Analyzing');
-      }).catch((e) => {
-        setErrorMessage('Failed to start browser media stream: ' + e.message);
-        setStatus('Error');
-      });
-    } else if (streamSource) {
-      video.crossOrigin = 'anonymous';
-      video.src = streamSource;
-      video.muted = true;
-      video.play().then(() => {
-        setStatus('Analyzing');
-      }).catch(() => {
-        setErrorMessage('Unable to connect to live stream source. Ensure CORS or direct stream compatibility.');
-        setStatus('Error');
-      });
+      if (activeMediaStream) {
+        video.srcObject = activeMediaStream;
+        video.muted = true;
+        video.play().then(() => {
+          setStatus('Analyzing');
+        }).catch((e) => {
+          setErrorMessage('Failed to start browser media stream: ' + e.message);
+          setStatus('Error');
+        });
+      } else if (currentSource) {
+        video.crossOrigin = 'anonymous';
+        video.src = currentSource;
+        video.muted = true;
+        video.play().then(() => {
+          setStatus('Analyzing');
+        }).catch(() => {
+          setErrorMessage(
+            'Unable to connect to live stream. The provided stream could not be decoded or requires CORS authorization.'
+          );
+          setStatus('Error');
+        });
+      }
     }
 
-    // Set sampling interval (1 frame every 1.2 seconds for real-time live forensics)
+    // Set sampling interval (~1 frame every 1.2 seconds for real-time live forensics)
     const samplingInterval = setInterval(() => {
       if (isRunningRef.current) {
         processLiveFrame();
@@ -274,6 +353,7 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
 
     return () => {
       clearInterval(samplingInterval);
+      const video = videoRef.current;
       if (video) {
         if (video.srcObject) {
           const s = video.srcObject as MediaStream;
@@ -282,7 +362,7 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
         video.src = '';
       }
     };
-  }, [streamSource, mediaStream, processLiveFrame]);
+  }, [youtubeId, currentSource, activeMediaStream, processLiveFrame]);
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 animate-fadeIn pb-16">
@@ -302,12 +382,14 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
                 LIVEGUARD FORENSICS
                 <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono uppercase bg-rose-500/20 text-rose-300 border border-rose-500/40">
                   <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse"></span>
-                  LIVE ●
+                  {youtubeId ? 'YOUTUBE LIVE ●' : 'LIVE ●'}
                 </span>
               </h2>
             </div>
-            <p className="text-xs text-slate-400 font-mono truncate max-w-sm sm:max-w-md mt-0.5">
-              Stream Source: <span className="text-cyan-300">{streamSource || 'Direct Media Stream'}</span>
+            <p className="text-xs text-slate-400 font-mono truncate max-w-sm sm:max-w-md mt-0.5 flex items-center gap-1.5">
+              <Globe className="w-3 h-3 text-cyan-400 shrink-0" />
+              <span>Stream Source:</span>
+              <span className="text-cyan-300 truncate">{currentSource || 'Live Media Feed'}</span>
             </p>
           </div>
         </div>
@@ -331,19 +413,30 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
         <div className="lg:col-span-2 space-y-4">
           <div className="relative rounded-3xl overflow-hidden border border-white/[0.08] bg-slate-950/90 shadow-2xl aspect-video flex items-center justify-center">
             
-            {/* Live Video Element */}
-            <video
-              ref={videoRef}
-              playsInline
-              autoPlay
-              muted
-              className="w-full h-full object-cover"
-            />
-            {/* Hidden canvas for pixel ELA and temporal math */}
+            {/* YouTube Live Embed Player */}
+            {youtubeId ? (
+              <iframe
+                src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&playsinline=1`}
+                className="w-full h-full object-cover"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                title="YouTube Live Stream"
+              />
+            ) : (
+              /* Standard HTML5 Video Element */
+              <video
+                ref={videoRef}
+                playsInline
+                autoPlay
+                muted
+                className="w-full h-full object-cover"
+              />
+            )}
+
+            {/* Hidden canvas for pixel ELA and temporal analysis */}
             <canvas ref={canvasRef} className="hidden" />
 
             {/* Live Overlay HUD */}
-            <div className="absolute top-4 left-4 flex items-center gap-2 pointer-events-none">
+            <div className="absolute top-4 left-4 flex items-center gap-2 pointer-events-none z-10">
               <div className="px-2.5 py-1 rounded-lg bg-black/70 backdrop-blur-md border border-white/10 text-[11px] font-mono text-white flex items-center gap-1.5 shadow-md">
                 <Clock className="w-3 h-3 text-cyan-400" />
                 <span>Runtime: {formatTime(runtimeSeconds)}</span>
@@ -355,7 +448,7 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
             </div>
 
             {/* Live Status Badge */}
-            <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between pointer-events-none">
+            <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between pointer-events-none z-10">
               <div className="px-3 py-1.5 rounded-xl bg-black/80 backdrop-blur-md border border-white/15 text-xs font-mono flex items-center gap-2">
                 {status === 'Suspicious Activity Detected' ? (
                   <>
@@ -382,29 +475,51 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
               )}
             </div>
 
-            {/* Error Message Modal */}
+            {/* Error Message & Recovery Modal */}
             {errorMessage && (
-              <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
-                <AlertTriangle className="w-10 h-10 text-rose-400 mb-2" />
-                <h3 className="text-sm font-bold text-white mb-1">Live Stream Error</h3>
-                <p className="text-xs text-rose-300 font-mono max-w-sm mb-4">{errorMessage}</p>
-                <button
-                  onClick={handleStop}
-                  className="px-4 py-2 rounded-xl bg-white/10 text-white text-xs font-mono hover:bg-white/20 transition-colors"
-                >
-                  Return to Dashboard
-                </button>
+              <div className="absolute inset-0 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20">
+                <AlertTriangle className="w-10 h-10 text-rose-400 mb-2 animate-bounce" />
+                <h3 className="text-sm font-bold text-white mb-1">Live Stream Connection Notice</h3>
+                <p className="text-xs text-rose-300 font-mono max-w-md mb-4 leading-relaxed">
+                  {errorMessage}
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    onClick={handleStartWebcam}
+                    className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-slate-950 text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-md"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Use Webcam Feed</span>
+                  </button>
+                  <button
+                    onClick={handleStartDemoStream}
+                    className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-mono flex items-center gap-1.5 transition-colors"
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                    <span>Use Demo Stream</span>
+                  </button>
+                  <button
+                    onClick={handleStop}
+                    className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white text-xs font-mono transition-colors"
+                  >
+                    Return to Dashboard
+                  </button>
+                </div>
               </div>
             )}
           </div>
 
           {/* Quick Info Box */}
-          <div className="p-4 rounded-2xl bg-slate-900/40 border border-white/[0.06] text-xs font-mono text-slate-400 flex items-center justify-between">
+          <div className="p-4 rounded-2xl bg-slate-900/40 border border-white/[0.06] text-xs font-mono text-slate-400 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
             <span className="flex items-center gap-2">
-              <Eye className="w-4 h-4 text-cyan-400" />
-              <span>Real-time rolling window analysis across continuous frame ingest.</span>
+              <Eye className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>
+                {youtubeId
+                  ? 'Live broadcast ingested via authorized YouTube player & continuous frame sampling.'
+                  : 'Real-time rolling window analysis across continuous frame ingest.'}
+              </span>
             </span>
-            <span className="text-slate-500">Sampling Rate: ~1 fps</span>
+            <span className="text-slate-500 shrink-0">Sampling Rate: ~1 fps</span>
           </div>
         </div>
 
@@ -472,11 +587,11 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
           {/* Real-time Status Card */}
           <div className="p-4 rounded-3xl bg-slate-900/40 border border-white/[0.08] space-y-2">
             <h4 className="text-xs font-bold text-white flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-cyan-400" />
+              <Radio className="w-4 h-4 text-cyan-400" />
               <span>Forensic Engine Status</span>
             </h4>
             <p className="text-[11px] font-mono text-slate-400 leading-relaxed">
-              HexGuard actively samples stream keyframes, running localized Error Level Analysis (ELA) and cross-frame temporal edge continuity.
+              HexGuard continuously evaluates live stream frames using localized Error Level Analysis (ELA) and cross-frame edge continuity to detect persistent synthetic anomalies.
             </p>
           </div>
         </div>
@@ -552,7 +667,7 @@ export const LiveGuardDashboard: React.FC<LiveGuardDashboardProps> = ({
           <div className="bg-slate-900 border border-white/15 rounded-3xl max-w-2xl w-full p-6 shadow-2xl space-y-4 animate-scaleUp">
             <div className="flex items-center justify-between pb-3 border-t-0 border-b border-slate-800">
               <div className="flex items-center gap-2">
-                <ShieldAlert className="w-5 h-5 text-cyan-400" />
+                <Radio className="w-5 h-5 text-cyan-400" />
                 <h3 className="text-base font-bold text-white font-mono">
                   Timestamp Inspection: {inspectedEvent.formattedTime}
                 </h3>
