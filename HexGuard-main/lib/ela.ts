@@ -86,11 +86,11 @@ export async function generateELA(
             let detectedTampering = false;
             let description = 'Error levels are uniformly distributed, typical of an uncompressed original or uniformly generated render.';
 
-            if (varianceRatio > 0.15 || maxDiff > 220) {
+            if (varianceRatio > 0.15 || (varianceRatio > 0.08 && maxDiff > 200)) {
               compressionVariance = 'high';
               detectedTampering = true;
               description = 'Significant localized compression variance detected. Highlighted high-frequency regions suggest digital splicing, inpainting, or composite elements.';
-            } else if (varianceRatio > 0.05 || avgError > 25) {
+            } else if (varianceRatio > 0.03 || avgError > 15) {
               compressionVariance = 'medium';
               description = 'Moderate error level fluctuations observed across edges and textures. Consistent with multi-generation recompression or subtle sharpening.';
             }
