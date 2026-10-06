@@ -25,6 +25,8 @@ export async function POST(req: NextRequest) {
       sha256,
       sourceUrl,
       sourcePlatform,
+      sourceTitle,
+      streamTitle,
       temporalConsistencyReport,
       framesAnalyzed,
       suspiciousFramesCount,
@@ -73,6 +75,7 @@ export async function POST(req: NextRequest) {
       mediaType,
       videoMetadata,
       keyframes,
+      title: streamTitle || sourceTitle,
     });
 
     // Attach security fingerprint, platform provenance, and temporal evidence

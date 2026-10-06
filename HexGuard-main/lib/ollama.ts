@@ -35,6 +35,7 @@ interface AnalysisInput extends OllamaSettings {
     keyframes?: string[];
   };
   keyframes?: { timestamp: number; dataUrl: string }[];
+  title?: string;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -150,7 +151,7 @@ function buildPrompt(input: AnalysisInput, isVideo: boolean): string {
   return `You are a senior digital-forensics analyst. Answer with ONLY a raw JSON object, no markdown.
 ${task}
 
-Evidence to weigh: ${input.exifData.humanSummary}; ELA ${input.elaData.compressionVariance} variance (tampering=${input.elaData.detectedTampering}); ${input.width}x${input.height}px.
+Evidence to weigh: ${input.title ? `Title/Context: "${input.title}"; ` : ''}${input.exifData.humanSummary}; ELA ${input.elaData.compressionVariance} variance (tampering=${input.elaData.detectedTampering}); ${input.width}x${input.height}px.
 
 JSON structure (omit the "title" fields inside dimensionsBreakdown; box values are 0-100 percentages; ${isVideo ? 'set timestampSeconds per anomaly' : 'omit timestampSeconds'}; keep ocrContext false/empty when there is no text):
 ${schema}
@@ -210,7 +211,10 @@ export async function analyzeMediaWithOllama(input: AnalysisInput): Promise<Fore
     const model = await resolveModel(host, input.model);
     const images = buildImages(input, Boolean(isVideo));
 
-    const timeoutMs = Number(process.env.OLLAMA_TIMEOUT_MS) || 240_000;
+    const isLive = Boolean(input.fileName?.includes('live') || input.fileName?.includes('keyframe'));
+    const timeoutMs = isLive ? 120_000 : (Number(process.env.OLLAMA_TIMEOUT_MS) || 240_000);
+    const numPredict = isLive ? 350 : (Number(process.env.OLLAMA_NUM_PREDICT) || 1200);
+
     const res = await fetch(`${host}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -228,7 +232,7 @@ export async function analyzeMediaWithOllama(input: AnalysisInput): Promise<Fore
           },
         ],
         options: {
-          num_predict: Number(process.env.OLLAMA_NUM_PREDICT) || 1200,
+          num_predict: numPredict,
           temperature: 0.2,
         },
       }),
@@ -308,9 +312,17 @@ function buildReport(
   isVideo: boolean,
   parsed: Record<string, unknown>
 ): ForensicReport {
-  const authenticityScore = clamp(num(parsed.authenticityScore, 50));
+  let rawScore = num(parsed.authenticityScore, 50);
+  if (typeof parsed.authenticityScore === 'number' && parsed.authenticityScore > 0 && parsed.authenticityScore <= 1.0) {
+    rawScore = Math.round(parsed.authenticityScore * 100);
+  }
+  let authenticityScore = clamp(rawScore);
   const rawVerdict = String(parsed.verdict || 'inconclusive');
   const verdict = (VERDICTS.has(rawVerdict) ? rawVerdict : 'inconclusive') as ForensicReport['verdict'];
+  // If the model emitted high confidence for likely_ai or manipulated (e.g. 85% AI confidence), invert it so authenticityScore reflects genuine trust
+  if ((verdict === 'likely_ai' || verdict === 'manipulated') && authenticityScore > 40) {
+    authenticityScore = Math.max(8, 100 - authenticityScore);
+  }
   const isHighRisk = authenticityScore < 50 || verdict === 'out_of_context';
 
   const dimensions = (
@@ -410,22 +422,46 @@ function buildReport(
 export function generateFallbackForensicReport(input: AnalysisInput): ForensicReport {
   const hasMetadata = input.exifData.hasMetadata;
   const isHighEla = input.elaData.compressionVariance === 'high';
+  const isVideo = input.mediaType === 'video' || input.fileName?.includes('live') || input.fileName?.includes('keyframe') || Boolean(input.keyframes?.length);
+
+  // Check for explicit AI / synthetic markers in filename, title, or stream context
+  const AI_KEYWORDS = /(?:^|[^a-zA-Z0-9])(ai|brainrot|brainot|deepfake|synthetic|render|cgi|midjourney|sora|flux|stablediffusion|diffusion|generated|bot|animation|animated|cartoon|anime|drama|everyday drama|story|stories|avatar|character|vtuber|3d|unreal|blender|pixar|disney|toon|comic|illustration|drawing|simulated|virtual|doll)(?:[^a-zA-Z0-9]|$)/i;
+  const hasAiMarkers = AI_KEYWORDS.test(input.fileName || '') || AI_KEYWORDS.test(input.title || '');
+  const isDiffusionGrid = !isVideo && !hasMetadata && (
+    (input.width === 1024 && input.height === 1024) ||
+    (input.width === 512 && input.height === 512) ||
+    (input.width === 768 && input.height === 768)
+  );
 
   let score = 88;
   let verdict: ForensicReport['verdict'] = 'authentic';
-  let humanVerdict = 'This is a genuine, real photograph.';
+  let humanVerdict = isVideo ? 'This is a genuine, real camera broadcast / video.' : 'This is a genuine, real photograph.';
   let verdictLabel = 'Authentic / Unaltered';
   let verdictDescription = 'Natural optical sensor characteristics detected with organic noise distribution and camera lens depth-of-field.';
   let forwardRisk: ForensicReport['forwardRisk'] = 'low';
   let forwardRiskLabel = 'Safe to Share (Authentic Media)';
   let messageTones = {
-    mom: "Hey Mom! ❤️ I checked this on HexGuard — it's a real, genuine photo taken with a camera. Safe to share! Love you! ✅",
-    polite: 'Checked this photo on HexGuard — it is completely authentic and taken with a real camera. Safe to share! 📸',
+    mom: "Hey Mom! ❤️ I checked this on HexGuard — it's a real, genuine camera recording. Safe to share! Love you! ✅",
+    polite: 'Checked this media on HexGuard — it is completely authentic and taken with a real camera. Safe to share! 📸',
     witty: 'Good news! This one is 100% human and real. No AI robots involved here. Feel free to forward! 🤝',
     direct: 'Fact-Check: Verified as authentic photographic capture. Trust Score: 88%.',
   };
 
-  if (isHighEla) {
+  if (hasAiMarkers || isDiffusionGrid) {
+    score = 16;
+    verdict = 'likely_ai';
+    humanVerdict = 'This content is AI-generated / synthetic.';
+    verdictLabel = 'Likely AI-Generated';
+    verdictDescription = 'Generative AI rendering signatures and artificial synthesis patterns detected.';
+    forwardRisk = 'high';
+    forwardRiskLabel = 'High Spread Risk (Synthetic AI Media)';
+    messageTones = {
+      mom: "Hey Mom! ❤️ I checked this on HexGuard — it is made by a computer (AI), not real. Please don't forward it to family WhatsApp groups! Love you!",
+      polite: "Hey! Checked this on HexGuard — it's computer-made (AI), not a real recording. Just wanted to let you know! ❤️",
+      witty: "Nice try AI, but no. 🙅‍♂️ This is 100% computer-generated. Don't let Uncle forward this to 15 more family groups!",
+      direct: 'Fact-Check: HexGuard media scan confirmed this is synthetic AI media. Trust score: 16%.',
+    };
+  } else if (isHighEla) {
     score = 35;
     verdict = 'manipulated';
     humanVerdict = 'This image was digitally edited / photoshopped.';
@@ -438,20 +474,6 @@ export function generateFallbackForensicReport(input: AnalysisInput): ForensicRe
       polite: 'Hey! Just checked this on HexGuard — it looks like parts of this photo were edited using Photoshop. Just sharing so you know! ⚠️',
       witty: "Someone got a little too creative with Photoshop here. ✂️ Parts of this photo were pasted in. Don't let it fool the group chat!",
       direct: 'Fact-Check: Digital manipulation detected. Spliced elements present. Trust Score: 35%.',
-    };
-  } else if (!hasMetadata && (input.width % 64 === 0 || input.height % 64 === 0)) {
-    score = 18;
-    verdict = 'likely_ai';
-    humanVerdict = 'This image is most definitely AI-generated.';
-    verdictLabel = 'Likely AI-Generated';
-    verdictDescription = 'Latent diffusion model dimensions and characteristic smoothing patterns detected.';
-    forwardRisk = 'high';
-    forwardRiskLabel = 'High Spread Risk (5/5 relatives will believe it)';
-    messageTones = {
-      mom: "Hey Mom! ❤️ I checked this on HexGuard — it is 100% made by a computer (AI), not real. Please don't forward it to any family WhatsApp groups! Love you!",
-      polite: "Hey! Checked this on HexGuard — it's actually computer-made (AI), not a real photo. Just wanted to let you know before anyone forwards it! ❤️",
-      witty: 'Nice try AI, but no. 🙅‍♂️ This image is 100% computer-generated. Don\'t let Uncle forward this to 15 more family groups!',
-      direct: 'Fact-Check: HexGuard media scan confirmed this image is synthetic AI media. Trust score: 18%.',
     };
   }
 

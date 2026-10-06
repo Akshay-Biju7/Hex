@@ -1,0 +1,11 @@
+{
+  "name": "hex-root",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix HexGuard-main run dev",
+    "build": "npm --prefix HexGuard-main run build",
+    "start": "npm --prefix HexGuard-main run start",
+    "lint": "npm --prefix HexGuard-main run lint",
+    "test": "npm --prefix HexGuard-main run test"
+  }
+}
