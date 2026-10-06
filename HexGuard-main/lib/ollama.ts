@@ -94,6 +94,8 @@ export async function resolveModel(host: string, preferred?: string): Promise<st
 
   try {
     const models = await listOllamaModels(host);
+    const dedicatedVision = models.find((m) => m.hasVision && (m.name.includes('vl') || m.name.includes('vision') || m.name.includes('llava')));
+    if (dedicatedVision) return dedicatedVision.name;
     if (models.some((m) => m.name === DEFAULT_MODEL)) return DEFAULT_MODEL;
     const vision = models.find((m) => m.hasVision);
     if (vision) return vision.name;
