@@ -10,7 +10,7 @@ import { ForensicReport, ExifReport, ElaReport, ForensicDimension, AnomalyItem }
  */
 
 const DEFAULT_OLLAMA_HOST = 'http://127.0.0.1:11434';
-const DEFAULT_MODEL = 'qwen2.5vl:7b';
+const DEFAULT_MODEL = 'tobestyledintro/qwen3.8-9b-distill:latest';
 
 export interface OllamaSettings {
   /** Base URL of the Ollama server, e.g. http://127.0.0.1:11434 */

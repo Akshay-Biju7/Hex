@@ -30,6 +30,8 @@ export const ExportReport: React.FC<ExportReportProps> = ({ report, onReset }) =
     const text = `🔍 HEXGUARD FORENSIC AUDIT REPORT
 ===================================
 Target File: ${report.fileName}
+Source: ${report.sourcePlatform || (report.sourceUrl ? 'Remote URL' : 'Local File Upload')}
+SHA-256: ${report.sha256 || 'Calculated at ingestion'}
 Bottom Line: ${report.humanVerdict}
 Verdict: ${report.verdictLabel.toUpperCase()}
 Trust Score: ${report.authenticityScore}/100 (Confidence: ${report.confidenceScore}%)
@@ -40,7 +42,7 @@ ${report.summary}
 
 FORENSIC RATIONALE:
 ${report.verdictDescription}
-
+${report.temporalConsistencyReport ? `\nTEMPORAL VIDEO FINDINGS:\n${report.temporalConsistencyReport.findings.join('\n')}\n` : ''}
 CAMERA & PROVENANCE:
 ${report.exifData.humanSummary}
 

@@ -22,6 +22,13 @@ export async function POST(req: NextRequest) {
       mediaType = 'image',
       videoMetadata,
       keyframes,
+      sha256,
+      sourceUrl,
+      sourcePlatform,
+      temporalConsistencyReport,
+      framesAnalyzed,
+      suspiciousFramesCount,
+      suspiciousTimestamps,
     } = body;
 
     if (!base64Image && (!keyframes || keyframes.length === 0)) {
@@ -67,6 +74,33 @@ export async function POST(req: NextRequest) {
       videoMetadata,
       keyframes,
     });
+
+    // Attach security fingerprint, platform provenance, and temporal evidence
+    if (sha256) report.sha256 = sha256;
+    if (sourceUrl) report.sourceUrl = sourceUrl;
+    if (sourcePlatform) report.sourcePlatform = sourcePlatform;
+    if (framesAnalyzed !== undefined) report.framesAnalyzed = framesAnalyzed;
+    if (suspiciousFramesCount !== undefined) report.suspiciousFramesCount = suspiciousFramesCount;
+    if (suspiciousTimestamps) report.suspiciousTimestamps = suspiciousTimestamps;
+
+    if (temporalConsistencyReport) {
+      report.temporalConsistencyReport = temporalConsistencyReport;
+      // Evidence fusion: integrate temporal findings if anomalies detected
+      if (!temporalConsistencyReport.isConsistent) {
+        if (report.dimensionsBreakdown?.optics) {
+          report.dimensionsBreakdown.optics.findings.push(
+            ...temporalConsistencyReport.findings
+          );
+          if (temporalConsistencyReport.score < 50) {
+            report.dimensionsBreakdown.optics.status = 'fail';
+            report.dimensionsBreakdown.optics.score = Math.min(
+              report.dimensionsBreakdown.optics.score,
+              temporalConsistencyReport.score
+            );
+          }
+        }
+      }
+    }
 
     return NextResponse.json(report);
   } catch (error) {

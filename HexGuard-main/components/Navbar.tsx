@@ -260,7 +260,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     type="text"
                     value={tempSettings.model}
                     onChange={(e) => setTempSettings({ ...tempSettings, model: e.target.value })}
-                    placeholder="qwen2.5vl:7b"
+                    placeholder="tobestyledintro/qwen3.8-9b-distill:latest"
                     className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all"
                   />
                 )}

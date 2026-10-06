@@ -5,12 +5,16 @@ import { Navbar, OllamaSettings } from '@/components/Navbar';
 import { ImageDropzone } from '@/components/ImageDropzone';
 import { AnalysisScanner } from '@/components/AnalysisScanner';
 import { ReportView } from '@/components/ReportView';
+import { LiveGuardDashboard } from '@/components/LiveGuardDashboard';
 import { ForensicReport, SamplePreset, ElaReport } from '@/lib/types';
 import { generateELA } from '@/lib/ela';
 import { parseImageMetadata } from '@/lib/exif';
+import { computeSha256 } from '@/lib/security';
+import { TemporalConsistencyEngine } from '@/lib/temporal';
 import { AlertCircle, Eye } from 'lucide-react';
 
 import { extractVideoKeyframes } from '@/lib/video';
+import { fetchMediaAsFile } from '@/lib/remote';
 
 export default function Home() {
   const [settings, setSettings] = useState<OllamaSettings>({ host: '', model: '' });
@@ -19,6 +23,12 @@ export default function Home() {
   const [currentFileName, setCurrentFileName] = useState<string>('sample.jpg');
   const [report, setReport] = useState<ForensicReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Live Stream Session State (LiveGuard)
+  const [liveSession, setLiveSession] = useState<{
+    streamSource: string;
+    mediaStream?: MediaStream;
+  } | null>(null);
 
   useEffect(() => {
     const host = localStorage.getItem('HEXGUARD_OLLAMA_HOST');
@@ -37,66 +47,90 @@ export default function Home() {
     setImagePreviewUrl(null);
     setError(null);
     setIsLoading(false);
+    setLiveSession(null);
+  };
+
+  // Start Live Stream Analysis (LiveGuard Mode)
+  const handleStartLiveStream = (options: { streamUrl?: string; mediaStream?: MediaStream }) => {
+    setError(null);
+    setReport(null);
+    setLiveSession({
+      streamSource: options.streamUrl || 'Live Feed',
+      mediaStream: options.mediaStream,
+    });
   };
 
   // Process and analyze an image or video (File or direct URL)
   const handleImageSelected = async (
     fileOrUrl: File | string,
-    metadata?: { name: string; size: string }
+    metadata?: { name: string; size: string; platform?: string }
   ) => {
     try {
       setError(null);
       setIsLoading(true);
 
-      const isVideoFile = typeof fileOrUrl !== 'string' && fileOrUrl.type.startsWith('video/');
-      const isVideoUrl = typeof fileOrUrl === 'string' && Boolean(fileOrUrl.match(/\.(mp4|webm|mov|m4v)($|\?)/i));
-      const isVideo = isVideoFile || isVideoUrl;
+      // A URL string (pasted link or sample preset) is downloaded into a real
+      // File first — cross-origin sources via our /api/fetch-media proxy — so
+      // ELA, EXIF, keyframe extraction and the Ollama vision call all receive
+      // actual bytes instead of an unfetchable URL string.
+      let mediaFile: File;
+      if (typeof fileOrUrl === 'string') {
+        setCurrentFileName('Fetching media from URL...');
+        const remote = await fetchMediaAsFile(fileOrUrl);
+        mediaFile = remote.file;
+      } else {
+        mediaFile = fileOrUrl;
+      }
+
+      const isVideo = mediaFile.type.startsWith('video/');
+
+      // Compute SHA-256 fingerprint from media file bytes
+      let sha256 = 'unavailable';
+      try {
+        const fileBuffer = await mediaFile.arrayBuffer();
+        sha256 = await computeSha256(fileBuffer);
+      } catch (err) {
+        console.warn('SHA-256 fingerprint generation error:', err);
+      }
 
       let dataUrl: string;
       let videoUrl: string | undefined;
-      let fileName = metadata?.name || (isVideo ? 'media_target.mp4' : 'media_target.jpg');
-      let fileSize = metadata?.size || 'Unknown';
-      let mimeType = isVideo ? 'video/mp4' : 'image/jpeg';
+      const fileName = metadata?.name || mediaFile.name;
+      const fileSize = metadata?.size || `${(mediaFile.size / (1024 * 1024)).toFixed(2)} MB`;
+      const mimeType = mediaFile.type || (isVideo ? 'video/mp4' : 'image/jpeg');
       let keyframesData: { timestamp: number; dataUrl: string }[] = [];
       let videoDuration = 10;
       let width = 1280;
       let height = 720;
+      let temporalReport: any = undefined;
 
       if (isVideo) {
-        if (typeof fileOrUrl !== 'string') {
-          videoUrl = URL.createObjectURL(fileOrUrl);
-          fileName = fileOrUrl.name;
-          fileSize = `${(fileOrUrl.size / (1024 * 1024)).toFixed(2)} MB`;
-        } else {
-          videoUrl = fileOrUrl;
-        }
+        videoUrl = URL.createObjectURL(mediaFile);
 
-        // Extract keyframes client-side using Canvas + HTML5 Video
-        const extraction = await extractVideoKeyframes(fileOrUrl, 5);
+        // Extract keyframes client-side using Canvas + HTML5 Video with intelligent sampling
+        const extraction = await extractVideoKeyframes(mediaFile, { frameCount: 6 });
         dataUrl = extraction.posterFrame;
         keyframesData = extraction.keyframes;
         videoDuration = extraction.duration;
         width = extraction.width;
         height = extraction.height;
-      } else {
-        if (typeof fileOrUrl === 'string') {
-          dataUrl = fileOrUrl;
-        } else {
-          fileName = fileOrUrl.name;
-          fileSize = `${(fileOrUrl.size / (1024 * 1024)).toFixed(2)} MB`;
-          mimeType = fileOrUrl.type || 'image/jpeg';
 
-          dataUrl = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(fileOrUrl);
-          });
+        // Run Temporal Consistency Engine across extracted sequential frames
+        try {
+          temporalReport = await TemporalConsistencyEngine.analyzeFrames(keyframesData);
+        } catch (err) {
+          console.warn('Temporal engine warning:', err);
         }
+      } else {
+        dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error('Could not read the media file.'));
+          reader.readAsDataURL(mediaFile);
+        });
 
         // 1. Get image dimensions
         const img = new Image();
-        img.crossOrigin = 'anonymous';
         const dimensions = await new Promise<{ width: number; height: number }>((resolve) => {
           img.onload = () => resolve({ width: img.naturalWidth || 800, height: img.naturalHeight || 600 });
           img.onerror = () => resolve({ width: 800, height: 600 });
@@ -156,6 +190,17 @@ export default function Home() {
           mediaType: isVideo ? 'video' : 'image',
           videoMetadata: isVideo ? { duration: videoDuration, keyframes: keyframesData.map(k => k.dataUrl) } : undefined,
           keyframes: isVideo ? keyframesData : undefined,
+          sha256,
+          sourceUrl: typeof fileOrUrl === 'string' ? fileOrUrl : undefined,
+          sourcePlatform: metadata?.platform,
+          temporalConsistencyReport: temporalReport,
+          framesAnalyzed: isVideo ? keyframesData.length : 1,
+          suspiciousFramesCount: temporalReport?.anomalyCount || 0,
+          suspiciousTimestamps: temporalReport?.anomalies?.map((a: any) => ({
+            timestamp: a.timestamp,
+            label: a.description,
+            evidence: [a.type, `Metric delta: ${a.metricDelta}`],
+          })),
         }),
       });
 
@@ -165,8 +210,19 @@ export default function Home() {
 
       const generatedReport: ForensicReport = await response.json();
       
-      // Attach computed ELA canvas image and video URL to the report
+      // Attach computed ELA canvas image, video URL, sha256, and temporal report
       generatedReport.elaImageUrl = elaImageUrl;
+      generatedReport.sha256 = sha256;
+      if (typeof fileOrUrl === 'string') {
+        generatedReport.sourceUrl = fileOrUrl;
+      }
+      if (metadata?.platform) {
+        generatedReport.sourcePlatform = metadata.platform;
+      }
+      if (temporalReport) {
+        generatedReport.temporalConsistencyReport = temporalReport;
+      }
+
       if (isVideo) {
         generatedReport.videoUrl = videoUrl;
         generatedReport.mediaType = 'video';
@@ -182,24 +238,13 @@ export default function Home() {
   };
 
   // Instant or live sample analysis
-  const handleSelectSample = async (sample: SamplePreset) => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      setCurrentFileName(`${sample.id}.${sample.mediaType === 'video' ? 'mp4' : 'jpg'}`);
-      setImagePreviewUrl(sample.imageUrl);
-
-      // Ollama is local and needs no API key, so every sample gets a real live
-      // analysis. If the model server is down, lib/ollama.ts falls back to heuristics.
-      await handleImageSelected(sample.videoUrl || sample.imageUrl, {
-        name: `${sample.id}.${sample.mediaType === 'video' ? 'mp4' : 'jpg'}`,
-        size: 'Sample Media',
-      });
-    } catch (err) {
-      console.error('Error loading sample:', err);
-      setError('Could not load preset sample. Please try again or upload media.');
-      setIsLoading(false);
-    }
+  const handleSelectSample = (sample: SamplePreset) => {
+    const source = sample.mediaType === 'video' && sample.videoUrl ? sample.videoUrl : sample.imageUrl;
+    return handleImageSelected(source, {
+      name: `${sample.id}.${sample.mediaType === 'video' ? 'mp4' : 'jpg'}`,
+      size: 'Sample Media',
+      platform: 'Sample Preset',
+    });
   };
 
   return (
@@ -210,7 +255,7 @@ export default function Home() {
         settings={settings}
         onSettingsChange={handleSettingsChange}
         onReset={handleReset}
-        hasActiveReport={Boolean(report)}
+        hasActiveReport={Boolean(report || liveSession)}
       />
 
       {/* Main App Container */}
@@ -232,8 +277,17 @@ export default function Home() {
           </div>
         )}
 
+        {/* View State: LiveGuard Mode */}
+        {liveSession && (
+          <LiveGuardDashboard
+            streamSource={liveSession.streamSource}
+            mediaStream={liveSession.mediaStream}
+            onStop={() => setLiveSession(null)}
+          />
+        )}
+
         {/* View State 1: Loading & Scanning */}
-        {isLoading && imagePreviewUrl && (
+        {!liveSession && isLoading && imagePreviewUrl && (
           <AnalysisScanner
             imagePreviewUrl={imagePreviewUrl}
             fileName={currentFileName}
@@ -241,15 +295,16 @@ export default function Home() {
         )}
 
         {/* View State 2: Active Verification Report */}
-        {!isLoading && report && (
+        {!liveSession && !isLoading && report && (
           <ReportView report={report} onReset={handleReset} />
         )}
 
-        {/* View State 3: Default Dropzone & Presets */}
-        {!isLoading && !report && (
+        {/* View State 3: Default Dropzone, Paste Link & Live Stream Inputs */}
+        {!liveSession && !isLoading && !report && (
           <ImageDropzone
             onImageSelected={handleImageSelected}
             onSelectSample={handleSelectSample}
+            onStartLiveStream={handleStartLiveStream}
             isLoading={isLoading}
           />
         )}
@@ -263,11 +318,11 @@ export default function Home() {
             <Eye className="w-4 h-4 text-cyan-400" />
             <span>HexGuard Media Forensics</span>
             <span>•</span>
-            <span>Dual-Layer Human &amp; Forensic Analysis</span>
+            <span>Files • URLs • Live Streams</span>
           </div>
 
           <div className="flex items-center gap-4">
-            <span>Canvas ELA Engine v2</span>
+            <span>Canvas ELA &amp; Temporal Engine</span>
             <span>•</span>
             <span>Local Ollama Vision</span>
           </div>

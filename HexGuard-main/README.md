@@ -82,9 +82,9 @@ npm test
 
 1. Install [Ollama](https://ollama.com/download) and pull a **vision-capable** pre-trained model:
    ```bash
-   ollama pull qwen2.5vl:7b      # recommended balance of speed & accuracy
-   # or, for stronger reasoning (slower on laptops):
-   ollama pull llama3.2-vision:11b
+   ollama pull tobestyledintro/qwen3.8-9b-distill:latest   # default — stronger reasoning (9B)
+   # or, for faster scans on laptops:
+   ollama pull qwen2.5vl:7b
    ```
 2. Start the daemon (`ollama serve` — it usually auto-starts on Windows/macOS).
 3. Launch HexGuard — the navbar status pill shows the detected model. Click **Local Model** to pick a
@@ -95,12 +95,87 @@ in `.env.local`:
 
 ```env
 OLLAMA_HOST=http://127.0.0.1:11434   # default daemon address
-OLLAMA_MODEL=qwen2.5vl:7b            # pin a specific model
+OLLAMA_MODEL=tobestyledintro/qwen3.8-9b-distill:latest   # pin a specific model
 OLLAMA_TIMEOUT_MS=240000             # hard client timeout per scan
 OLLAMA_NUM_PREDICT=1200              # max tokens the model may generate
 ```
 
-> ⏱️ **Latency note:** on a 6 GB laptop GPU (RTX 4050), the default `qwen2.5vl:7b` scans the bundled sample in
-> ~90–100 s warm (~146 s on the very first cold load); a heavier 9B Q4 vision model takes ~189 s. Smaller quantizations
-> trade accuracy for speed. The UI keeps the radar animation running for the whole inference. If Ollama is unreachable,
-> HexGuard transparently falls back to its deterministic EXIF + ELA heuristic engine so the demo never dies.
+> ⏱️ **Latency note:** on a 6 GB laptop GPU (RTX 4050), the default 9B `qwen3.8-9b-distill` scans the bundled sample in
+> ~189 s; the lighter `qwen2.5vl:7b` alternative takes ~90–100 s warm (~146 s on the very first cold load). Smaller
+> quantizations trade accuracy for speed. The UI keeps the radar animation running for the whole inference. If Ollama
+> is unreachable, HexGuard transparently falls back to its deterministic EXIF + ELA heuristic engine so the demo never dies.
+
+---
+
+## 🛰️ Extended Media Ingestion & LiveGuard Architecture
+
+HexGuard provides a tri-modal ingestion pipeline:
+
+```
+                    HEXGUARD
+                        │
+          ┌─────────────┼─────────────┐
+          │             │             │
+      FILE MODE      URL MODE      LIVEGUARD
+          │             │             │
+          │       Platform Adapter    │
+          │             │             │
+          │       Media Ingestion     │
+          │             │             │
+          └─────────────┼─────────────┘
+                        ↓
+                 MEDIA PROCESSING
+                        ↓
+                 FRAME EXTRACTION
+                        ↓
+              ┌─────────────────────┐
+              │ HEXGUARD FORENSICS  │
+              ├─────────────────────┤
+              │ ELA                 │
+              │ Compression         │
+              │ Biometrics          │
+              │ Optics & Physics    │
+              │ Generative Artifacts│
+              │ Semantic Analysis   │
+              │ Metadata            │
+              │ Provenance          │
+              │ SHA-256             │
+              └─────────────────────┘
+                        ↓
+              TEMPORAL ANALYSIS
+                 (video/live)
+                        ↓
+                 EVIDENCE FUSION
+                        ↓
+                  RISK ENGINE
+                        ↓
+             TRUST + CONFIDENCE
+                        ↓
+              HEXGUARD DASHBOARD
+                        ↓
+             REPORT / CERTIFICATE
+```
+
+### 1. Ingestion Modes
+- **Upload File**: Local drag-and-drop, clipboard paste (`Ctrl+V`), and preset sample library.
+- **Paste Link**: URL validation via `/api/platforms/validate` supporting:
+  - **YouTube Adapter**: Retrieves authorized oEmbed/API metadata; determines live/recorded state. Strictly respects platform terms of service and informs users if direct raw media extraction is restricted.
+  - **Instagram Adapter**: Validates post/reel structure and safely handles access policies without crashing.
+  - **Direct Media Source**: Safely proxies direct MP4, WebM, MOV, JPG, and PNG sources.
+- **LiveGuard (Live Stream Forensics)**: Continuous stream monitoring via stream URL (HLS / MP4 stream) or local WebRTC camera / screen capture for live testing. Features:
+  - Rolling risk and trust score engine.
+  - Multi-signal persistence (never flags high risk from a single anomalous frame).
+  - Live Forensic Timeline Feed with clickable timestamp frame inspection.
+
+### 2. Video Temporal Consistency Engine
+- Checks consecutive frame transitions for:
+  - Lighting and color temperature jumps ($\Delta L$).
+  - High-frequency edge jitter and boundary morphing (typical of diffusion video models).
+  - Sudden quantization variance shifts across cut boundaries.
+  - Motion continuity.
+
+### 3. Security & SSRF Protection
+- Server-side validation restricts fetches to HTTP/HTTPS.
+- Complete private and internal IP blocking (loopback `127.0.0.1`, `::1`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, link-local `169.254.169.254`).
+- Strict 50 MB media payload ceiling and cryptographic SHA-256 fingerprinting on ingestion.
+

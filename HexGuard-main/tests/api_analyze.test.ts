@@ -91,4 +91,45 @@ describe('API Route /api/analyze Integration Tests', () => {
     assert.strictEqual(report.videoMetadata.duration, 12.0);
     assert.strictEqual(typeof report.authenticityScore, 'number');
   });
+
+  test('should fuse sha256 fingerprint, source platform, and temporal consistency evidence', async () => {
+    const req = new NextRequest('http://localhost:3000/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base64Image: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=',
+        fileName: 'platform_stream.mp4',
+        fileSize: '5.2 MB',
+        width: 1280,
+        height: 720,
+        mimeType: 'video/mp4',
+        sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        sourceUrl: 'https://example.com/stream.mp4',
+        sourcePlatform: 'Direct Media Source',
+        temporalConsistencyReport: {
+          isConsistent: false,
+          score: 42,
+          anomalyCount: 2,
+          findings: ['Sudden illumination delta detected at 00:03.4s.'],
+          metrics: {
+            lightingStability: 40,
+            boundaryStability: 50,
+            compressionContinuity: 45,
+            motionSmoothness: 55,
+          },
+        },
+      }),
+    });
+
+    const response = await POST(req);
+    assert.strictEqual(response.status, 200);
+
+    const report = await response.json();
+    assert.strictEqual(report.sha256, 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+    assert.strictEqual(report.sourcePlatform, 'Direct Media Source');
+    assert.strictEqual(report.sourceUrl, 'https://example.com/stream.mp4');
+    assert.ok(report.temporalConsistencyReport);
+    assert.strictEqual(report.temporalConsistencyReport.isConsistent, false);
+    assert.strictEqual(report.temporalConsistencyReport.score, 42);
+  });
 });

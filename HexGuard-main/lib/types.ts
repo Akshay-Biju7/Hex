@@ -138,6 +138,31 @@ export interface ForensicReport {
   elaData: ElaReport;
 
   recommendedActions: string[];
+
+  // Security, Platform Provenance & Temporal Video Fields
+  sha256?: string;
+  sourceUrl?: string;
+  sourcePlatform?: string;
+  framesAnalyzed?: number;
+  suspiciousFramesCount?: number;
+  suspiciousTimestamps?: {
+    timestamp: number;
+    label: string;
+    frameDataUrl?: string;
+    evidence?: string[];
+  }[];
+  temporalConsistencyReport?: {
+    isConsistent: boolean;
+    score: number;
+    anomalyCount: number;
+    findings: string[];
+    metrics: {
+      lightingStability: number;
+      boundaryStability: number;
+      compressionContinuity: number;
+      motionSmoothness: number;
+    };
+  };
 }
 
 export interface SamplePreset {
