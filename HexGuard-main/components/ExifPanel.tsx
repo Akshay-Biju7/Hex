@@ -13,13 +13,19 @@ import {
 } from 'lucide-react';
 
 interface ExifPanelProps {
-  exifData: ExifReport;
+  exifData?: ExifReport;
 }
 
 export const ExifPanel: React.FC<ExifPanelProps> = ({ exifData }) => {
   const [showRawTags, setShowRawTags] = useState(false);
 
-  const rawKeys = Object.keys(exifData.rawTags || {});
+  const safeExif: ExifReport = exifData || {
+    hasMetadata: false,
+    humanSummary: 'No EXIF metadata tags found.',
+    rawTags: {},
+  };
+
+  const rawKeys = Object.keys(safeExif.rawTags || {});
 
   return (
     <div className="space-y-4 glass-panel border border-slate-800/80 rounded-3xl p-6 shadow-2xl">
@@ -37,7 +43,7 @@ export const ExifPanel: React.FC<ExifPanelProps> = ({ exifData }) => {
           </div>
         </div>
 
-        {exifData.hasMetadata ? (
+        {safeExif.hasMetadata ? (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-500/30">
             <ShieldCheck className="w-3.5 h-3.5" />
             Camera Tags Present
@@ -52,23 +58,23 @@ export const ExifPanel: React.FC<ExifPanelProps> = ({ exifData }) => {
 
       {/* Primary Plain-English Human Summary Banner */}
       <div className={`p-4 rounded-2xl border flex items-start gap-3 ${
-        exifData.hasMetadata
+        safeExif.hasMetadata
           ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-200'
           : 'bg-amber-950/30 border-amber-500/30 text-amber-200'
       }`}>
-        {exifData.hasMetadata ? (
+        {safeExif.hasMetadata ? (
           <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
         ) : (
           <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
         )}
         <div className="space-y-1">
           <h4 className="text-sm font-bold">
-            {exifData.humanSummary}
+            {safeExif.humanSummary}
           </h4>
-          {exifData.warning && (
+          {safeExif.warning && (
             <p className="text-xs text-slate-400 font-mono">
               <span className="text-slate-500 font-semibold uppercase">Forensic Note: </span>
-              {exifData.warning}
+              {safeExif.warning}
             </p>
           )}
         </div>
@@ -79,56 +85,56 @@ export const ExifPanel: React.FC<ExifPanelProps> = ({ exifData }) => {
         <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
           <span className="text-[10px] font-mono uppercase text-slate-500">Camera Device</span>
           <p className="text-xs font-mono font-semibold text-white truncate">
-            {exifData.cameraMake ? `${exifData.cameraMake} ${exifData.cameraModel || ''}` : 'No Sensor Tag'}
+            {safeExif.cameraMake ? `${safeExif.cameraMake} ${safeExif.cameraModel || ''}` : 'No Sensor Tag'}
           </p>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
           <span className="text-[10px] font-mono uppercase text-slate-500">Processing Software</span>
           <p className="text-xs font-mono font-semibold text-white truncate">
-            {exifData.software || 'Raw Stream / Synthetic'}
+            {safeExif.software || 'Raw Stream / Synthetic'}
           </p>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
           <span className="text-[10px] font-mono uppercase text-slate-500">Capture Timestamp</span>
           <p className="text-xs font-mono font-semibold text-white truncate">
-            {exifData.dateTime || 'Missing Header'}
+            {safeExif.dateTime || 'Missing Header'}
           </p>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
           <span className="text-[10px] font-mono uppercase text-slate-500">Shutter Speed</span>
           <p className="text-xs font-mono font-semibold text-white truncate">
-            {exifData.exposureTime ? `${exifData.exposureTime}s` : 'N/A'}
+            {safeExif.exposureTime ? `${safeExif.exposureTime}s` : 'N/A'}
           </p>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
           <span className="text-[10px] font-mono uppercase text-slate-500">Aperture</span>
           <p className="text-xs font-mono font-semibold text-white truncate">
-            {exifData.fNumber ? `f/${exifData.fNumber}` : 'N/A'}
+            {safeExif.fNumber ? `f/${safeExif.fNumber}` : 'N/A'}
           </p>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
           <span className="text-[10px] font-mono uppercase text-slate-500">ISO Sensitivity</span>
           <p className="text-xs font-mono font-semibold text-white truncate">
-            {exifData.iso ? `ISO ${exifData.iso}` : 'N/A'}
+            {safeExif.iso ? `ISO ${safeExif.iso}` : 'N/A'}
           </p>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
           <span className="text-[10px] font-mono uppercase text-slate-500">Focal Length</span>
           <p className="text-xs font-mono font-semibold text-white truncate">
-            {exifData.focalLength ? `${exifData.focalLength}mm` : 'N/A'}
+            {safeExif.focalLength ? `${safeExif.focalLength}mm` : 'N/A'}
           </p>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
           <span className="text-[10px] font-mono uppercase text-slate-500">Color Profile</span>
           <p className="text-xs font-mono font-semibold text-white truncate">
-            {exifData.colorSpace || 'sRGB / Standard'}
+            {safeExif.colorSpace || 'sRGB / Standard'}
           </p>
         </div>
       </div>
@@ -150,7 +156,7 @@ export const ExifPanel: React.FC<ExifPanelProps> = ({ exifData }) => {
               {rawKeys.map((key) => (
                 <div key={key} className="flex justify-between border-b border-slate-900 pb-1">
                   <span className="text-slate-500">{key}:</span>
-                  <span className="text-slate-200 truncate max-w-xs">{exifData.rawTags?.[key]}</span>
+                  <span className="text-slate-200 truncate max-w-xs">{safeExif.rawTags?.[key]}</span>
                 </div>
               ))}
             </div>

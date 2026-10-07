@@ -7,6 +7,7 @@ import { AnalysisScanner } from '@/components/AnalysisScanner';
 import { ReportView } from '@/components/ReportView';
 import { LiveGuardDashboard } from '@/components/LiveGuardDashboard';
 import { ForensicReport, SamplePreset, ElaReport } from '@/lib/types';
+import { SAMPLE_PRESETS } from '@/lib/samples';
 import { generateELA } from '@/lib/ela';
 import { parseImageMetadata } from '@/lib/exif';
 import { computeSha256 } from '@/lib/security';
@@ -34,6 +35,31 @@ export default function Home() {
     const host = localStorage.getItem('HEXGUARD_OLLAMA_HOST');
     const model = localStorage.getItem('HEXGUARD_OLLAMA_MODEL');
     if (host || model) setSettings({ host: host || '', model: model || '' });
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const sampleId = params.get('sample');
+      if (sampleId) {
+        const found = SAMPLE_PRESETS.find(s => s.id === sampleId);
+        if (found && found.precomputedReport) {
+          setReport({
+            ...found.precomputedReport,
+            id: found.precomputedReport.id || `preset-${found.id}`,
+            timestamp: found.precomputedReport.timestamp || new Date().toISOString(),
+            fileName: found.title,
+            fileSize: '1.4 MB',
+            mediaType: found.mediaType || 'image',
+            imageUrl: found.imageUrl,
+            videoUrl: found.videoUrl,
+            dimensions: { width: 1200, height: 800 },
+          });
+          setImagePreviewUrl(found.imageUrl);
+          setCurrentFileName(found.title);
+        }
+      } else if (params.get('view') === 'live') {
+        setLiveSession({ streamSource: 'Live Stream Feed (RTMP / WebRTC)' });
+      }
+    }
   }, []);
 
   const handleSettingsChange = (next: OllamaSettings) => {
@@ -239,6 +265,22 @@ export default function Home() {
 
   // Instant or live sample analysis
   const handleSelectSample = (sample: SamplePreset) => {
+    if (sample.precomputedReport) {
+      setReport({
+        ...sample.precomputedReport,
+        id: sample.precomputedReport.id || `preset-${sample.id}`,
+        timestamp: sample.precomputedReport.timestamp || new Date().toISOString(),
+        fileName: sample.title,
+        fileSize: '1.4 MB',
+        mediaType: sample.mediaType || 'image',
+        imageUrl: sample.imageUrl,
+        videoUrl: sample.videoUrl,
+        dimensions: { width: 1200, height: 800 },
+      });
+      setImagePreviewUrl(sample.imageUrl);
+      setCurrentFileName(sample.title);
+      return;
+    }
     const source = sample.mediaType === 'video' && sample.videoUrl ? sample.videoUrl : sample.imageUrl;
     return handleImageSelected(source, {
       name: `${sample.id}.${sample.mediaType === 'video' ? 'mp4' : 'jpg'}`,
